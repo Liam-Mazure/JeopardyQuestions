@@ -14,6 +14,7 @@ class JeopardyspiderSpider(scrapy.Spider):
         print(f"Processing Season {current_season}, Episode {current_episode}")
         print(f"Current URL: {response.url}")
 
+        #Finds list of all seasons 
         all_seasons_link = response.css('#navbartext a::attr(href)').getall()[2]
         print(all_seasons_link)
         yield response.follow('https://www.j-archive.com/' + all_seasons_link, callback = self.parse_all_seasons, meta = {'current_season': current_season, "current_episode": current_episode})  
@@ -58,6 +59,7 @@ class JeopardyspiderSpider(scrapy.Spider):
 
 
     def parse_double_jeopardy(self, response):
+        #Fetch from parse_episode()
         current_season = response.meta.get("current_season")
         current_episode = response.meta.get("current_episode")
 
@@ -94,12 +96,13 @@ class JeopardyspiderSpider(scrapy.Spider):
 
     def parse_all_seasons(self,response):
 
+        #Fetched from parse()
         current_season = response.meta.get("current_season", 1)
         current_episode = response.meta.get("current_episode", 1)
         total_episodes = 0
 
         if 'listseasons.php' in response.url:
-            #Query to find each seasons total number of episodes
+            #Query to find each seasons total number of episodes, then reverses it to start with the first season
             num_episodes_query = response.xpath("//div[@id = 'content']//table//tr[td[1]/a[starts-with(text(), 'Season')]]/td[3]/text()").getall()
             num_episodes_query.reverse()
             print(f"Fetched num episodes list: {num_episodes_query}")
@@ -113,7 +116,7 @@ class JeopardyspiderSpider(scrapy.Spider):
             num_list = re.search(r'\d+', num_episodes)
             print(f"Regex search result: {num_list}")
             if num_list:
-                #int storing the episodes in the current season from the prvious string
+                #Int storing the episodes in the current season from the prvious string
                 total_episodes = int(num_list.group(0))
                 print(f"Total Episodes Found: {total_episodes}")
             else:
@@ -128,15 +131,15 @@ class JeopardyspiderSpider(scrapy.Spider):
         print("Season Links Found: ", season_links)
 
 
-        #filters out the links that are not numerical seasons
+        #Filters out the links that are not numerical seasons
         filtered_season_links = [
             link for link in season_links
-            #walrus operator allows assignment inside an expression
+            #Walrus operator allows assignment inside an expression
             if(match := re.search(r"season=(\d+)", link)) and 1 <= int(match.group(1)) <= 41
         ]
         print("Filtered Season Links: ", filtered_season_links)
 
-        #finds the link in the filtered list that matches the current season
+        #Finds the link in the filtered list that matches the current season
         current_season_link = next(
             (link for link in filtered_season_links if re.search(rf"season={current_season}\b", link)),
             None
@@ -151,6 +154,7 @@ class JeopardyspiderSpider(scrapy.Spider):
             return
     
     def parse_season(self, response):
+        #Feteched from parse_all_seasons()
         current_season = response.meta.get("current_season", 1)
         current_episode = response.meta.get("current_episode", 1)
         total_episodes = response.meta.get("total_episodes", 0)
@@ -161,7 +165,7 @@ class JeopardyspiderSpider(scrapy.Spider):
             self.logger.error(f"Wrong season page: {response.url}")
             return
         
-        #finds the links for each episode in the current season, then reverses it to start at 1.
+        #Finds the links for each episode in the current season, then reverses it to start at 1.
         episode_links = response.xpath("//table//tr[td[1]/a[starts-with(text(), '#')]]/td[1]/a/@href").getall()
         episode_links.reverse()
         print(f"Season: {current_season}, Season{current_season} Episode Links: ", episode_links)
@@ -175,6 +179,7 @@ class JeopardyspiderSpider(scrapy.Spider):
             
     def parse_episode(self, response):
         
+        #Fetched from parse_season()
         current_season = response.meta.get("current_season", 1)
         current_episode = response.meta.get("current_episode", 1)
         episode_links = response.meta.get("episode_links", [])
@@ -192,12 +197,16 @@ class JeopardyspiderSpider(scrapy.Spider):
 
         next_game = response.xpath("//table[@id = 'contestants_table']//tr//td[3]//a/@href").get()
 
+        #Checks if next game btn is present
         if next_game is not None:
+            #If the btn is there and the episode # is less than the total for the season. Follow the link add to episode. Otherwise add to season and find next season
             if current_episode < total_episodes:
+                #"dont_filter allows for allows for multiple of the same calls"
                 yield response.follow('https://www.j-archive.com/' + next_game, callback = self.parse_episode, meta = {'current_season': current_season, 'current_episode': current_episode + 1, 'total_episodes': total_episodes}, dont_filter = True)
             else:
                 yield response.follow('https://www.j-archive.com/listseasons.php', callback = self.parse_all_seasons, meta = {'current_season': current_season + 1, 'current_episode': 1}, dont_filter = True)
         else:
+            #If the btn is not present check if episode is less than total. Then either go to current season and add to episode, or go to next season and add to season
             if current_episode < total_episodes:
                 yield response.follow(f'https://www.j-archive.com/showseason.php?season={current_season}', callback = self.parse_season, meta = {'current_season': current_season, 'current_episode': current_episode + 1, 'total_episodes': total_episodes}, dont_filter = True)
             else:
